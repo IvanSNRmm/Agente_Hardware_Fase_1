@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Optional, Tuple
 import math
 
+
 """
 Sistema de Detección y Navegación Autónoma
 _________________________________________________________________________
@@ -99,6 +100,7 @@ ALTURA_PROMEDIO_PERSONA = 1.75
 ANCHO_PROMEDIO_HOMBROS = 0.45  
 DISTANCIA_SEGURIDAD_PERSONAS = 2  
 # Configuración de cámara para cálculo de distancia
+ANCHO_CAMARA_MM = 8
 ANCHO_CAMARA = 800
 ALTO_CAMARA = 600
 ANGULO_VISION_HORIZONTAL = 60  # ángulo de visión de la cámara
@@ -113,7 +115,12 @@ def inicializar_csv():
     """
     Inicializar archivo CSV con encabezados
     
-    En la sección de writerow se pueden agregar o quitar encabezados a guardar
+    En la sección de writerow se pueden agregar o quitar encabezados a guardar.
+    
+    Variables
+    ____________
+    ARCHIVO_CVS : str
+        Nombre del archivo CVS
     """
     if not os.path.exists(ARCHIVO_CSV):
         with open(ARCHIVO_CSV, 'w', newline='', encoding='utf-8') as archivo:
@@ -128,9 +135,9 @@ def inicializar_csv():
             ])
         print(f" Archivo CSV creado: {ARCHIVO_CSV}")
 
-def registrar_evento(rojo_detectado, area_rojo, amarillo_detectado, area_amarillo, 
-                    gris_detectado, area_gris, personas_detectadas, persona_cercana, 
-                    distancia_minima, accion_tomada):
+def registrar_evento(rojo_detectado:bool, area_rojo:int, amarillo_detectado:bool, area_amarillo:int, 
+                    gris_detectado:bool, area_gris:int, personas_detectadas:int, persona_cercana:bool, 
+                    distancia_minima:float, accion_tomada:str):
     """
     Registrar evento en archivo CSV con los datos proporcionados
     Tomar en cuenta que al existir ya el archivo cvs, unicamente va agregando la 
@@ -138,8 +145,27 @@ def registrar_evento(rojo_detectado, area_rojo, amarillo_detectado, area_amarill
     
     Parámetros
     ____________
-    rojo_detectado: str
-    area_rojo : str
+    rojo_detectado: bool
+        Indica presencia de color rojo
+    area_rojo : int
+        Cantidad de rojo en px.
+    amarillo_detectado: bool
+        Indica presencia de color amarillo
+    area_amarillo : int
+        Cantidad de amarillo en px.
+    gris_detectado: bool
+        Indica presencia de color gris
+    area_gris : int
+        Cantidad de gris en px.
+    personas_detectadas : int 
+        Cantidad de personas detectadas en el frame.
+    persona_cercana : bool
+        Indicador de persona en área de seguridad
+    distancia_minima : float
+        La distancia mínima de detección de persona.
+    accion_tomada : str
+        Comando enviado al ESP32
+    
     """
     try:
         with open(ARCHIVO_CSV, 'a', newline='', encoding='utf-8') as archivo:
@@ -287,7 +313,7 @@ def crear_mascara_color(frame : np.ndarray, color : str) -> np.ndarray:
     _____________
     PARAMETROS_COLORES : dict [str : dict [str : dict]] 
         Contiene los colores a evaluar, asi como los parámetros de estos en el dict
-    Retornos
+    Retorno
     _____________
     mascara : np.ndarray/None
         Contiene los datos de la nueva máscara 
@@ -388,6 +414,10 @@ def calcular_intensidad_color(area_color : float, area_frame: float)->float:
         Area total del color calculada a partir de los contornos
     area_frame : float
         Area total del frame 
+    Retorno 
+    ___________
+    float
+        Intensidad del color
     """
     if area_frame == 0:
         return 0
@@ -402,15 +432,17 @@ def calibrar_camara()-> float:
     
     Variables
     ___________
-    ANCHO_CAMARA : int 
-        Valor del ancho de cantidad de pixeles de la camara
+    ANCHO_CAMARA_MM : float 
+        Valor del ancho camara en mm
     ANGULO_VISION_HORIZONTAL : float 
         Angulo de vision total de ambos lados, se considera (theta)/2 para cada lado
-    Retorno : float 
+    Retorno
+    ___________
+    focal_length : float 
         Distancia focal calculada en pixeles 
     """
     # Calcular distancia focal usando el ángulo de visión
-    focal_length = (ANCHO_CAMARA / 2) / math.tan(math.radians(ANGULO_VISION_HORIZONTAL / 2))
+    focal_length = (ANCHO_CAMARA_MM / 2) / math.tan(math.radians(ANGULO_VISION_HORIZONTAL / 2))
     print(f" Cámara calibrada:")
     print(f"   - Focal length: {focal_length:.1f} px")
     print(f"   - Ángulo visión: {ANGULO_VISION_HORIZONTAL}°")
@@ -423,24 +455,24 @@ def calcular_distancia_persona(bbox: list[int,int, int, int], focal_length: floa
     Parámetros
     ___________
     bbox: list
-        list[x1, y1, x2, y2] lista de puntos críticos
+        list[x1, y1, x2, y2] lista de puntos críticos de ubicación de persona.
     focal_length : float/None
         Distancia focal previamente calculada en pixeles
-    Retorno
+    Retornos
     ___________
-    float, int
+    float
         calculo de distancia final promediada
     """
     #Obtener puntos críticos del rectángulo
     x1, y1, x2, y2 = bbox
     altura_pixeles = y2 - y1
     ancho_pixeles = x2 - x1
-    # Primera estimación: Por altura, valores pasan a m
+    # Primera estimación: Por altura, valores pse quedan en m
     if altura_pixeles > 50:
         dist_altura = (ALTURA_PROMEDIO_PERSONA * focal_length) / altura_pixeles
     else:
         dist_altura = None
-    # Segunda estimación: Por ancho de hombros, valores pasan a m
+    # Segunda estimación: Por ancho de hombros, valores se quedan en m 
     if ancho_pixeles > 20:
         dist_ancho = (ANCHO_PROMEDIO_HOMBROS * focal_length) / ancho_pixeles
     else:
@@ -458,12 +490,13 @@ def calcular_distancia_persona(bbox: list[int,int, int, int], focal_length: floa
 
 # Sección del modelo YOLO para detección de personas y calculo de su distancia
 def inicializar_yolo()-> YOLO:
-    """
+    """ 
     Inicializar modelo YOLO para detección de personas
     
     Retornos
     ___________
     model : YOLO, None
+        Modelo inicializado 
     """
     try:
         model = YOLO('yolov8n.pt')
@@ -633,7 +666,7 @@ def procesar_video():
     focal_length = calibrar_camara()  # Calibrar cámara para distancia focal
     inicializar_csv()
     usar_filtros = USAR_FILTROS_LUZ
-    #Manejo de errores para evitar codigo quede trabado
+    #Manejo de errores para evitar codigo quede trabado o se interrumpa abruptamente
     try:
         # Conectar al stream MJPEG del ESP32-CAM
         stream = urlopen(ESP32_CAM_URL, timeout=5)
@@ -684,7 +717,7 @@ def procesar_video():
                     intensidad_gris = calcular_intensidad_color(area_gris, area_frame_total)
                     # Detección de personas y cálculo de distancia
                     (personas_detectadas, num_personas, persona_cercana, 
-                     distancia_minima, img_anotada) = detectar_personas_con_distancia(img_procesada, model, focal_length)
+                     distancia_minima, frame_anotado) = detectar_personas_con_distancia(img_procesada, model, focal_length)
                     # Sección de visualización de máscaras DE gris a color analizado
                     mascara_rojo_visual = cv2.cvtColor(mascara_rojo, cv2.COLOR_GRAY2BGR) if mascara_rojo is not None else np.zeros((600,800,3), np.uint8)
                     mascara_amarillo_visual = cv2.cvtColor(mascara_amarillo, cv2.COLOR_GRAY2BGR) if mascara_amarillo is not None else np.zeros((600,800,3), np.uint8)
@@ -710,7 +743,7 @@ def procesar_video():
                                     accion_tomada = "DETENER_AMARILLO_GRIS"
                         # PRIORIDAD 3: Rojo detectado y poco gris → AVANZAR  
                         #Valores altos de intensidad para que avance en el caso de gris y amarillo
-                        elif rojo_detectado and intensidad_amarillo < 0.7 and intensidad_gris < 0.4:
+                        elif rojo_detectado and intensidad_amarillo < 0.7 and intensidad_gris < 0.7:
                             if comando_actual != "AVANZAR":
                                 print(" AVANZAR - Rojo detectado")
                                 if enviar_comando_esp32("AVANZAR", 120):
@@ -725,24 +758,24 @@ def procesar_video():
                     estado_sistema = "ACTIVO" if sistema_activo else "INACTIVO"
                     color_estado = (0, 255, 0) if sistema_activo else (0, 0, 255)
                     # Dibujar información sobre la imagen
-                    cv2.putText(img_anotada, f'SISTEMA: {estado_sistema}', (10, 25), 
+                    cv2.putText(frame_anotado, f'SISTEMA: {estado_sistema}', (10, 25), 
                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_estado, 1)
-                    cv2.putText(img_anotada, f'Rojo: {rojo_detectado} ({area_rojo})', (10, 45), 
+                    cv2.putText(frame_anotado, f'Rojo: {rojo_detectado} ({area_rojo})', (10, 45), 
                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
-                    cv2.putText(img_anotada, f'Amarillo: {intensidad_amarillo:.2f}', (10, 65), 
+                    cv2.putText(frame_anotado, f'Amarillo: {intensidad_amarillo:.2f}', (10, 65), 
                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
-                    cv2.putText(img_anotada, f'Gris: {intensidad_gris:.2f}', (10, 85), 
+                    cv2.putText(frame_anotado, f'Gris: {intensidad_gris:.2f}', (10, 85), 
                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (128, 128, 128), 1)
-                    cv2.putText(img_anotada, f'Personas: {num_personas}', (10, 105), 
+                    cv2.putText(frame_anotado, f'Personas: {num_personas}', (10, 105), 
                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 100, 0), 1)
                     if distancia_minima is not None:
                         color_distancia = (0, 0, 255) if persona_cercana else (255, 255, 255)
-                        cv2.putText(img_anotada, f'Dist. min: {distancia_minima:.2f}m', (10, 125), 
+                        cv2.putText(frame_anotado, f'Dist. min: {distancia_minima:.2f}m', (10, 125), 
                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, color_distancia, 1)
-                    cv2.putText(img_anotada, f'Comando: {comando_actual}', (10, 145), 
+                    cv2.putText(frame_anotado, f'Comando: {comando_actual}', (10, 145), 
                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
                     if accion_tomada != "NINGUNA":
-                        cv2.putText(img_anotada, f'ACCION: {accion_tomada}', (10, 170), 
+                        cv2.putText(frame_anotado, f'ACCION: {accion_tomada}', (10, 170), 
                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
                     # Registro del CVS
                     #Evalua sistema activo True y accion_tomada diferente a ninguna
@@ -757,9 +790,9 @@ def procesar_video():
                         )
                     # Grabar videos original y procesado
                     if grabando_video:
-                        grabar_frames(frame_original, img_anotada)
+                        grabar_frames(frame_original, frame_anotado)
                     # Mostrar ventanas 
-                    cv2.imshow('ESP32-CAM - Sistema Avanzado', img_anotada)
+                    cv2.imshow('ESP32-CAM - Sistema Avanzado', frame_anotado)
                     cv2.imshow('Mascara Rojo', mascara_rojo_visual)
                     cv2.imshow('Mascara Amarillo', mascara_amarillo_visual) 
                     cv2.imshow('Mascara Gris', mascara_gris_visual)
